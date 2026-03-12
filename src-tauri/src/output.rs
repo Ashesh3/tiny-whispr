@@ -1,5 +1,7 @@
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
+use tauri::AppHandle;
+use tauri_plugin_notification::NotificationExt;
 
 /// Copies text to the system clipboard.
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
@@ -44,4 +46,23 @@ pub fn output_text(text: &str, mode: &str) -> Result<(), String> {
         "auto_paste" => auto_paste(text),
         _ => copy_to_clipboard(text),
     }
+}
+
+/// Dispatches text output and sends a notification in clipboard mode.
+///
+/// - `"auto_paste"`: copies to clipboard and simulates Ctrl+V
+/// - `"clipboard"`: copies to clipboard and shows a notification
+pub fn output_text_with_notify(app: &AppHandle, text: &str, mode: &str) -> Result<(), String> {
+    output_text(text, mode)?;
+
+    if mode != "auto_paste" {
+        let _ = app
+            .notification()
+            .builder()
+            .title("TinyWhispr")
+            .body("Transcription copied to clipboard")
+            .show();
+    }
+
+    Ok(())
 }
