@@ -121,8 +121,7 @@ pub fn start_recording(
     recorder.start_recording()?;
 
     // Update tray state
-    let _ = tray::update_tray_icon(&app, tray::TrayState::Recording);
-    let _ = tray::update_tray_menu_text(&app, true);
+    let _ = tray::set_tray_state(&app, tray::TrayState::Recording);
 
     let _ = app.emit("recording-started", ());
 
@@ -141,8 +140,7 @@ pub async fn stop_recording(
     let wav_data = recorder.stop_recording()?;
 
     // Update tray to processing state
-    let _ = tray::update_tray_icon(&app, tray::TrayState::Processing);
-    let _ = tray::update_tray_menu_text(&app, false);
+    let _ = tray::set_tray_state(&app, tray::TrayState::Processing);
 
     let _ = app.emit("recording-stopped", ());
 
@@ -178,13 +176,13 @@ pub async fn stop_recording(
                 crate::output::output_text_with_notify(&app, &result.text, &settings.output_mode);
 
             // Update tray back to idle
-            let _ = tray::update_tray_icon(&app, tray::TrayState::Idle);
+            let _ = tray::set_tray_state(&app, tray::TrayState::Idle);
 
             let _ = app.emit("transcription-complete", ());
         }
         Err(e) => {
             // Update tray back to idle
-            let _ = tray::update_tray_icon(&app, tray::TrayState::Idle);
+            let _ = tray::set_tray_state(&app, tray::TrayState::Idle);
 
             let error_msg = e.to_string();
             let _ = app.emit("transcription-error", &error_msg);
