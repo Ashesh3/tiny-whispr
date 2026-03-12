@@ -65,3 +65,8 @@ pub fn clear_history(db: State<'_, Database>) -> Result<(), String> {
 pub fn search_history(db: State<'_, Database>, query: String) -> Result<Vec<Transcription>, String> {
     db.search(&query)
 }
+
+#[tauri::command]
+pub fn copy_to_clipboard(text: String) -> Result<(), String> {
+    crate::output::copy_to_clipboard(&text)
+}

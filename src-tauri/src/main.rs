@@ -20,6 +20,7 @@ fn main() {
             tinywhispr::commands::delete_transcription,
             tinywhispr::commands::clear_history,
             tinywhispr::commands::search_history,
+            tinywhispr::commands::copy_to_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
