@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::{image::Image, AppHandle, Emitter, Manager};
 
 /// Represents the current state of the tray icon.
@@ -101,6 +101,17 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
                 _ => {}
             }
         })
+        .on_tray_icon_event(|tray, event| {
+            // Single left-click toggles recording
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let _ = tray.app_handle().emit("tray-toggle-recording", ());
+            }
+        })
         .build(app)
         .map_err(|e| format!("Failed to build tray icon: {e}"))?;
 
@@ -129,6 +140,15 @@ pub fn update_tray_icon(app: &AppHandle, state: TrayState) -> Result<(), String>
 
     let icon =
         Image::from_bytes(icon_bytes).map_err(|e| format!("Failed to load tray icon: {e}"))?;
+
+    let tooltip = match state {
+        TrayState::Idle => "TinyWhispr — Click to record",
+        TrayState::Recording => "TinyWhispr — Recording...",
+        TrayState::Processing => "TinyWhispr — Processing...",
+    };
+
+    tray.set_tooltip(Some(tooltip))
+        .map_err(|e| format!("Failed to set tooltip: {e}"))?;
 
     tray.set_icon(Some(icon))
         .map_err(|e| format!("Failed to set tray icon: {e}"))?;
