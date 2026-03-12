@@ -12,6 +12,8 @@
   let unlistenNavigate: UnlistenFn | null = null;
   let unlistenTray: UnlistenFn | null = null;
   let unlistenClose: (() => void) | null = null;
+  let unlistenComplete: UnlistenFn | null = null;
+  let unlistenError: UnlistenFn | null = null;
 
   onMount(async () => {
     // Listen for tray navigation events
@@ -42,6 +44,15 @@
       }
     });
 
+    // Reset state when transcription finishes or fails
+    unlistenComplete = await listen("transcription-complete", () => {
+      recordingState.set("idle");
+    });
+
+    unlistenError = await listen("transcription-error", () => {
+      recordingState.set("idle");
+    });
+
     // Hide window on close instead of quitting
     const appWindow = getCurrentWindow();
     unlistenClose = await appWindow.onCloseRequested(async (event) => {
@@ -53,6 +64,8 @@
   onDestroy(() => {
     if (unlistenNavigate) unlistenNavigate();
     if (unlistenTray) unlistenTray();
+    if (unlistenComplete) unlistenComplete();
+    if (unlistenError) unlistenError();
     if (unlistenClose) unlistenClose();
   });
 </script>
