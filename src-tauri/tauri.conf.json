@@ -15,20 +15,6 @@
         "decorations": false,
         "skipTaskbar": true,
         "center": true
-      },
-      {
-        "label": "indicator",
-        "url": "/src/indicator/indicator.html",
-        "width": 80,
-        "height": 28,
-        "resizable": false,
-        "visible": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "x": 680,
-        "y": 20
       }
     ],
     "security": {

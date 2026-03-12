@@ -1,9 +1,10 @@
-use std::sync::Mutex;
-use tauri::menu::{Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{image::Image, AppHandle, Emitter, Manager};
 
-/// Represents the current state of the tray icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayState {
     Idle,
@@ -11,26 +12,15 @@ pub enum TrayState {
     Processing,
 }
 
-/// The tray icon id used throughout the application.
 const TRAY_ID: &str = "tinywhispr-tray";
 
-/// Holds a reference to the toggle menu item so its text can be updated.
-pub struct TrayMenuState {
-    toggle_item: Mutex<MenuItem<tauri::Wry>>,
+/// Shared state for tray menu item + pulse animation control.
+pub struct TrayAnimState {
+    toggle_item: Mutex<tauri::menu::MenuItem<tauri::Wry>>,
+    pulsing: Arc<AtomicBool>,
 }
 
-/// Creates the system tray icon with a context menu.
-///
-/// Menu items:
-/// - "Start Recording" (id: toggle)
-/// - Separator
-/// - "Open Settings" (id: settings)
-/// - "Open History" (id: history)
-/// - Separator
-/// - "Quit" (id: quit)
-///
-/// The toggle `MenuItem` is stored in Tauri's managed state as `TrayMenuState`
-/// so that `update_tray_menu_text` can later change its text.
+/// Creates the system tray icon with context menu and left-click toggle.
 pub fn create_tray(app: &AppHandle) -> Result<(), String> {
     let toggle_item = MenuItemBuilder::with_id("toggle", "Start Recording")
         .build(app)
@@ -48,11 +38,8 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
         .build(app)
         .map_err(|e| format!("Failed to create quit menu item: {e}"))?;
 
-    let sep1 = PredefinedMenuItem::separator(app)
-        .map_err(|e| format!("Failed to create separator: {e}"))?;
-
-    let sep2 = PredefinedMenuItem::separator(app)
-        .map_err(|e| format!("Failed to create separator: {e}"))?;
+    let sep1 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+    let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
 
     let menu = Menu::with_items(
         app,
@@ -65,25 +52,23 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
             &quit_item,
         ],
     )
-    .map_err(|e| format!("Failed to create tray menu: {e}"))?;
+    .map_err(|e| e.to_string())?;
 
-    // Store the toggle item in managed state for later text updates
-    app.manage(TrayMenuState {
+    app.manage(TrayAnimState {
         toggle_item: Mutex::new(toggle_item),
+        pulsing: Arc::new(AtomicBool::new(false)),
     });
 
-    // Use the default app icon for the tray
     let icon = Image::from_bytes(include_bytes!("../icons/icon.png"))
         .map_err(|e| format!("Failed to load tray icon: {e}"))?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .menu(&menu)
-        .tooltip("TinyWhispr")
+        .tooltip("TinyWhispr — Click to record")
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| {
-            let id = event.id().as_ref();
-            match id {
+            match event.id().as_ref() {
                 "toggle" => {
                     let _ = app.emit("tray-toggle-recording", ());
                 }
@@ -95,14 +80,11 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
                     show_main_window(app);
                     let _ = app.emit("navigate", "history");
                 }
-                "quit" => {
-                    app.exit(0);
-                }
+                "quit" => app.exit(0),
                 _ => {}
             }
         })
         .on_tray_icon_event(|tray, event| {
-            // Single left-click toggles recording
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -118,7 +100,6 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Shows the main window and brings it to focus.
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -126,53 +107,76 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// Updates the tray icon based on the current application state.
+/// Updates the tray icon and starts/stops the pulse animation.
 pub fn update_tray_icon(app: &AppHandle, state: TrayState) -> Result<(), String> {
-    let tray = app
-        .tray_by_id(TRAY_ID)
-        .ok_or_else(|| "Tray icon not found".to_string())?;
+    let anim_state = app.state::<TrayAnimState>();
 
-    let icon_bytes: &[u8] = match state {
+    // Stop any existing pulse
+    anim_state.pulsing.store(false, Ordering::Relaxed);
+
+    // Set the static icon first
+    set_tray_icon_bytes(app, match state {
         TrayState::Idle => include_bytes!("../icons/icon.png"),
         TrayState::Recording => include_bytes!("../icons/icon-recording.png"),
         TrayState::Processing => include_bytes!("../icons/icon-processing.png"),
-    };
+    })?;
 
-    let icon =
-        Image::from_bytes(icon_bytes).map_err(|e| format!("Failed to load tray icon: {e}"))?;
+    // Set tooltip
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let tooltip = match state {
+            TrayState::Idle => "TinyWhispr — Click to record",
+            TrayState::Recording => "TinyWhispr — Recording...",
+            TrayState::Processing => "TinyWhispr — Processing...",
+        };
+        let _ = tray.set_tooltip(Some(tooltip));
+    }
 
-    let tooltip = match state {
-        TrayState::Idle => "TinyWhispr — Click to record",
-        TrayState::Recording => "TinyWhispr — Recording...",
-        TrayState::Processing => "TinyWhispr — Processing...",
-    };
+    // Start pulse animation for recording
+    if state == TrayState::Recording {
+        anim_state.pulsing.store(true, Ordering::Relaxed);
+        let pulsing = anim_state.pulsing.clone();
+        let handle = app.clone();
 
-    tray.set_tooltip(Some(tooltip))
-        .map_err(|e| format!("Failed to set tooltip: {e}"))?;
+        std::thread::spawn(move || {
+            let bright = include_bytes!("../icons/icon-recording.png");
+            let dim = include_bytes!("../icons/icon-recording-dim.png");
+            let mut show_bright = true;
 
-    tray.set_icon(Some(icon))
-        .map_err(|e| format!("Failed to set tray icon: {e}"))?;
+            while pulsing.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(600));
+                if !pulsing.load(Ordering::Relaxed) {
+                    break;
+                }
+                show_bright = !show_bright;
+                let _ = set_tray_icon_bytes(
+                    &handle,
+                    if show_bright { bright } else { dim },
+                );
+            }
+        });
+    }
 
     Ok(())
 }
 
-/// Updates the text of the toggle menu item based on recording state.
+fn set_tray_icon_bytes(app: &AppHandle, bytes: &[u8]) -> Result<(), String> {
+    let tray = app
+        .tray_by_id(TRAY_ID)
+        .ok_or_else(|| "Tray icon not found".to_string())?;
+    let icon = Image::from_bytes(bytes).map_err(|e| format!("Failed to load icon: {e}"))?;
+    tray.set_icon(Some(icon))
+        .map_err(|e| format!("Failed to set icon: {e}"))
+}
+
+/// Updates the toggle menu item text.
 pub fn update_tray_menu_text(app: &AppHandle, recording: bool) -> Result<(), String> {
-    let menu_state = app.state::<TrayMenuState>();
-    let toggle = menu_state
+    let anim_state = app.state::<TrayAnimState>();
+    let toggle = anim_state
         .toggle_item
         .lock()
         .map_err(|e| format!("Lock error: {e}"))?;
 
-    let text = if recording {
-        "Stop Recording"
-    } else {
-        "Start Recording"
-    };
-
     toggle
-        .set_text(text)
-        .map_err(|e| format!("Failed to set menu text: {e}"))?;
-
-    Ok(())
+        .set_text(if recording { "Stop Recording" } else { "Start Recording" })
+        .map_err(|e| format!("Failed to set menu text: {e}"))
 }

@@ -18,7 +18,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: "index.html",
-        indicator: "src/indicator/indicator.html",
       },
     },
   },

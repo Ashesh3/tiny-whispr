@@ -56,11 +56,6 @@ fn main() {
                 let _ = app.handle().autolaunch().enable();
             }
 
-            // Set indicator window to click-through
-            if let Some(indicator) = app.get_webview_window("indicator") {
-                let _ = indicator.set_ignore_cursor_events(true);
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| {
