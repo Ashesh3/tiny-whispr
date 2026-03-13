@@ -1,7 +1,7 @@
 {
   "identifier": "default",
   "description": "Default capabilities for TinyWhispr",
-  "windows": ["main", "recording-overlay"],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:default",

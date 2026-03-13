@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 
@@ -120,9 +120,8 @@ pub fn start_recording(
 
     recorder.start_recording()?;
 
-    // Play start chime and show overlay
+    // Subtle ascending chime
     play_start_chime();
-    show_recording_overlay(&app);
 
     // Update tray state
     let _ = tray::set_tray_state(&app, tray::TrayState::Recording);
@@ -147,41 +146,6 @@ fn play_start_chime() {
             }
         }
     });
-}
-
-/// Shows a small overlay that says "Recording..." then fades and auto-closes.
-fn show_recording_overlay(app: &AppHandle) {
-    use tauri::WebviewWindowBuilder;
-    use tauri::WebviewUrl;
-
-    // Remove previous overlay if still open
-    if let Some(w) = app.get_webview_window("recording-overlay") {
-        let _ = w.close();
-    }
-
-    let url = WebviewUrl::App("src/overlay.html".into());
-
-    let builder = WebviewWindowBuilder::new(app, "recording-overlay", url)
-        .title("")
-        .inner_size(220.0, 56.0)
-        .center()
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .focused(false);
-
-    if let Ok(window) = builder.build() {
-        let _ = window.set_ignore_cursor_events(true);
-
-        // Auto-close after the animation finishes
-        let w = window.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1800));
-            let _ = w.close();
-        });
-    }
 }
 
 #[tauri::command]
