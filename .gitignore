@@ -1,5 +1,31 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 src-tauri/target/
-.superpowers/
+
+# Tauri auto-generated schemas (regenerated on build)
+src-tauri/gen/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
 *.log
+
+# Superpowers (internal planning)
+.superpowers/
+docs/superpowers/
+
+# Environment
+.env
+.env.*
