@@ -11,7 +11,40 @@
   let activeTab = $state("settings");
   let cleanups: UnlistenFn[] = [];
 
+  async function startRecording() {
+    if (get(recordingState) !== "idle") {
+      return;
+    }
+
+    recordingState.set("recording");
+    try {
+      await invoke("start_recording");
+    } catch {
+      recordingState.set("idle");
+    }
+  }
+
+  async function stopRecording() {
+    if (get(recordingState) !== "recording") {
+      return;
+    }
+
+    recordingState.set("processing");
+    try {
+      await invoke("stop_recording");
+    } catch {
+      recordingState.set("idle");
+    }
+  }
+
   onMount(async () => {
+    try {
+      const initialState = await invoke<"idle" | "recording">("get_recording_state");
+      recordingState.set(initialState);
+    } catch {
+      recordingState.set("idle");
+    }
+
     cleanups.push(
       await listen<string>("navigate", (event) => {
         activeTab = event.payload;
@@ -21,20 +54,26 @@
         const currentState = get(recordingState);
 
         if (currentState === "idle") {
-          recordingState.set("recording");
-          try {
-            await invoke("start_recording");
-          } catch {
-            recordingState.set("idle");
-          }
+          await startRecording();
         } else if (currentState === "recording") {
-          recordingState.set("processing");
-          try {
-            await invoke("stop_recording");
-          } catch {
-            recordingState.set("idle");
-          }
+          await stopRecording();
         }
+      }),
+
+      await listen("shortcut-start-recording", async () => {
+        await startRecording();
+      }),
+
+      await listen("shortcut-stop-recording", async () => {
+        await stopRecording();
+      }),
+
+      await listen("recording-started", () => {
+        recordingState.set("recording");
+      }),
+
+      await listen("recording-stopped", () => {
+        recordingState.set("processing");
       }),
 
       await listen("transcription-complete", () => {

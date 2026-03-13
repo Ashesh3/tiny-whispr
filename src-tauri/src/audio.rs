@@ -1,4 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::SampleFormat;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -8,14 +9,22 @@ const RESAMPLE_CHUNK_SIZE: usize = 1024;
 
 pub struct AudioRecorder {
     is_recording: Arc<AtomicBool>,
+    limit_reached: Arc<AtomicBool>,
     samples: Arc<Mutex<Vec<f32>>>,
     sample_rate: Arc<Mutex<u32>>,
+}
+
+impl Default for AudioRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AudioRecorder {
     pub fn new() -> Self {
         Self {
             is_recording: Arc::new(AtomicBool::new(false)),
+            limit_reached: Arc::new(AtomicBool::new(false)),
             samples: Arc::new(Mutex::new(Vec::new())),
             sample_rate: Arc::new(Mutex::new(TARGET_SAMPLE_RATE)),
         }
@@ -25,10 +34,16 @@ impl AudioRecorder {
         self.is_recording.load(Ordering::SeqCst)
     }
 
+    pub fn limit_reached(&self) -> bool {
+        self.limit_reached.load(Ordering::SeqCst)
+    }
+
     pub fn start_recording(&self) -> Result<(), String> {
         if self.is_recording() {
             return Err("Already recording".to_string());
         }
+
+        self.limit_reached.store(false, Ordering::SeqCst);
 
         // Clear samples buffer before starting
         {
@@ -37,6 +52,7 @@ impl AudioRecorder {
         }
 
         let is_recording = Arc::clone(&self.is_recording);
+        let limit_reached = Arc::clone(&self.limit_reached);
         let samples = Arc::clone(&self.samples);
         let sample_rate_shared = Arc::clone(&self.sample_rate);
 
@@ -64,6 +80,8 @@ impl AudioRecorder {
 
             let native_rate = config.sample_rate().0;
             let channels = config.channels() as usize;
+            let sample_format = config.sample_format();
+            let stream_config: cpal::StreamConfig = config.into();
 
             // Store the native sample rate
             if let Ok(mut rate) = sample_rate_shared.lock() {
@@ -73,36 +91,86 @@ impl AudioRecorder {
             // Calculate max samples for the 5-minute limit
             let max_samples = (MAX_DURATION_SECS * native_rate as f64) as usize;
 
-            let is_recording_cb = Arc::clone(&is_recording);
-            let samples_cb = Arc::clone(&samples);
+            let stream = match sample_format {
+                SampleFormat::F32 => {
+                    let is_recording_cb = Arc::clone(&is_recording);
+                    let limit_reached_cb = Arc::clone(&limit_reached);
+                    let samples_cb = Arc::clone(&samples);
 
-            let stream = match device.build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if !is_recording_cb.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    let mut buf = match samples_cb.lock() {
-                        Ok(b) => b,
-                        Err(_) => return,
-                    };
+                    device.build_input_stream(
+                        &stream_config,
+                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                            capture_samples(
+                                &is_recording_cb,
+                                &limit_reached_cb,
+                                &samples_cb,
+                                data,
+                                channels,
+                                max_samples,
+                                |sample| sample,
+                            );
+                        },
+                        move |err| {
+                            eprintln!("Audio stream error: {err}");
+                        },
+                        None,
+                    )
+                }
+                SampleFormat::I16 => {
+                    let is_recording_cb = Arc::clone(&is_recording);
+                    let limit_reached_cb = Arc::clone(&limit_reached);
+                    let samples_cb = Arc::clone(&samples);
 
-                    // Mix to mono
-                    for frame in data.chunks(channels) {
-                        let mono: f32 = frame.iter().sum::<f32>() / channels as f32;
-                        buf.push(mono);
-                    }
+                    device.build_input_stream(
+                        &stream_config,
+                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            capture_samples(
+                                &is_recording_cb,
+                                &limit_reached_cb,
+                                &samples_cb,
+                                data,
+                                channels,
+                                max_samples,
+                                |sample| sample as f32 / i16::MAX as f32,
+                            );
+                        },
+                        move |err| {
+                            eprintln!("Audio stream error: {err}");
+                        },
+                        None,
+                    )
+                }
+                SampleFormat::U16 => {
+                    let is_recording_cb = Arc::clone(&is_recording);
+                    let limit_reached_cb = Arc::clone(&limit_reached);
+                    let samples_cb = Arc::clone(&samples);
 
-                    // Enforce max duration
-                    if buf.len() >= max_samples {
-                        is_recording_cb.store(false, Ordering::SeqCst);
-                    }
-                },
-                move |err| {
-                    eprintln!("Audio stream error: {err}");
-                },
-                None,
-            ) {
+                    device.build_input_stream(
+                        &stream_config,
+                        move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                            capture_samples(
+                                &is_recording_cb,
+                                &limit_reached_cb,
+                                &samples_cb,
+                                data,
+                                channels,
+                                max_samples,
+                                |sample| (sample as f32 - 32768.0) / 32768.0,
+                            );
+                        },
+                        move |err| {
+                            eprintln!("Audio stream error: {err}");
+                        },
+                        None,
+                    )
+                }
+                other => {
+                    let _ = tx.send(Err(format!("Unsupported input sample format: {other:?}")));
+                    return;
+                }
+            };
+
+            let stream = match stream {
                 Ok(s) => s,
                 Err(e) => {
                     let _ = tx.send(Err(format!("Failed to build input stream: {e}")));
@@ -133,7 +201,8 @@ impl AudioRecorder {
     }
 
     pub fn stop_recording(&self) -> Result<Vec<u8>, String> {
-        if !self.is_recording() {
+        let limit_reached = self.limit_reached.swap(false, Ordering::SeqCst);
+        if !self.is_recording() && !limit_reached {
             return Err("Not recording".to_string());
         }
 
@@ -143,8 +212,8 @@ impl AudioRecorder {
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         let samples = {
-            let buf = self.samples.lock().map_err(|e| format!("Lock error: {e}"))?;
-            buf.clone()
+            let mut buf = self.samples.lock().map_err(|e| format!("Lock error: {e}"))?;
+            std::mem::take(&mut *buf)
         };
 
         let native_rate = {
@@ -183,6 +252,39 @@ impl AudioRecorder {
             return 0;
         }
         (samples_len as u64 * 1000) / rate as u64
+    }
+}
+
+fn capture_samples<T, F>(
+    is_recording: &Arc<AtomicBool>,
+    limit_reached: &Arc<AtomicBool>,
+    samples: &Arc<Mutex<Vec<f32>>>,
+    data: &[T],
+    channels: usize,
+    max_samples: usize,
+    convert: F,
+)
+where
+    T: Copy,
+    F: Fn(T) -> f32,
+{
+    if !is_recording.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let mut buf = match samples.lock() {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+
+    for frame in data.chunks(channels) {
+        let mono = frame.iter().copied().map(&convert).sum::<f32>() / channels as f32;
+        buf.push(mono);
+    }
+
+    if buf.len() >= max_samples {
+        limit_reached.store(true, Ordering::SeqCst);
+        is_recording.store(false, Ordering::SeqCst);
     }
 }
 

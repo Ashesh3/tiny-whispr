@@ -116,24 +116,29 @@ pub fn mask_api_key(key: &str) -> String {
     }
 }
 
-/// Validates incoming settings, preserves the existing API key if the incoming one
-/// is empty or matches the mask pattern, saves to disk, and returns the merged settings.
-pub fn save_settings_merged(incoming: Settings) -> Result<Settings, String> {
+/// Validates incoming settings and preserves the stored API key when the frontend
+/// submits an empty string or the masked placeholder value.
+pub fn merge_settings(incoming: Settings, existing: &Settings) -> Result<Settings, String> {
     validate_settings(&incoming)?;
-
-    let existing = load_settings();
 
     let api_key = if incoming.api_key.is_empty() || incoming.api_key == mask_api_key(&existing.api_key)
     {
-        existing.api_key
+        existing.api_key.clone()
     } else {
         incoming.api_key
     };
 
-    let merged = Settings {
+    Ok(Settings {
         api_key,
         ..incoming
-    };
+    })
+}
+
+/// Validates incoming settings, preserves the existing API key if the incoming one
+/// is empty or matches the mask pattern, saves to disk, and returns the merged settings.
+pub fn save_settings_merged(incoming: Settings) -> Result<Settings, String> {
+    let existing = load_settings();
+    let merged = merge_settings(incoming, &existing)?;
 
     save_settings_to_file(&merged)?;
     Ok(merged)
@@ -165,40 +170,50 @@ mod tests {
 
     #[test]
     fn test_validate_bad_url() {
-        let mut s = Settings::default();
-        s.base_url = "ftp://example.com".to_string();
+        let s = Settings {
+            base_url: "ftp://example.com".to_string(),
+            ..Settings::default()
+        };
         let err = validate_settings(&s).unwrap_err();
         assert!(err.contains("base_url"));
     }
 
     #[test]
     fn test_validate_bad_activation_mode() {
-        let mut s = Settings::default();
-        s.activation_mode = "hold".to_string();
+        let s = Settings {
+            activation_mode: "hold".to_string(),
+            ..Settings::default()
+        };
         let err = validate_settings(&s).unwrap_err();
         assert!(err.contains("activation_mode"));
     }
 
     #[test]
     fn test_validate_bad_output_mode() {
-        let mut s = Settings::default();
-        s.output_mode = "print".to_string();
+        let s = Settings {
+            output_mode: "print".to_string(),
+            ..Settings::default()
+        };
         let err = validate_settings(&s).unwrap_err();
         assert!(err.contains("output_mode"));
     }
 
     #[test]
     fn test_validate_hotkey_no_modifier() {
-        let mut s = Settings::default();
-        s.hotkey = "Space".to_string();
+        let s = Settings {
+            hotkey: "Space".to_string(),
+            ..Settings::default()
+        };
         let err = validate_settings(&s).unwrap_err();
         assert!(err.contains("modifier"));
     }
 
     #[test]
     fn test_validate_hotkey_only_modifier() {
-        let mut s = Settings::default();
-        s.hotkey = "Ctrl+Shift".to_string();
+        let s = Settings {
+            hotkey: "Ctrl+Shift".to_string(),
+            ..Settings::default()
+        };
         let err = validate_settings(&s).unwrap_err();
         assert!(err.contains("non-modifier"));
     }
@@ -213,5 +228,20 @@ mod tests {
     fn test_mask_api_key_empty() {
         let masked = mask_api_key("");
         assert_eq!(masked, "");
+    }
+
+    #[test]
+    fn test_merge_settings_preserves_existing_masked_key() {
+        let existing = Settings {
+            api_key: "sk-secret".to_string(),
+            ..Settings::default()
+        };
+        let incoming = Settings {
+            api_key: mask_api_key(&existing.api_key),
+            ..Settings::default()
+        };
+
+        let merged = merge_settings(incoming, &existing).unwrap();
+        assert_eq!(merged.api_key, "sk-secret");
     }
 }

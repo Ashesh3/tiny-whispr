@@ -1,12 +1,16 @@
+use std::time::Duration;
+
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 
 use crate::audio::AudioRecorder;
 use crate::db::{Database, Transcription};
-use crate::hotkey::HotkeyManager;
-use crate::settings::{load_settings, mask_api_key, save_settings_merged, Settings};
+use crate::hotkey::{register_from_settings, HotkeyManager};
+use crate::settings::{
+    load_settings, mask_api_key, merge_settings, save_settings_to_file, Settings,
+};
 use crate::tray;
 
 /// A version of Settings where the API key is always masked for safe frontend display.
@@ -52,13 +56,21 @@ pub fn save_settings(
     hotkey_mgr: State<'_, HotkeyManager>,
 ) -> Result<MaskedSettings, String> {
     let old_settings = load_settings();
-    let saved = save_settings_merged(settings)?;
+    let saved = merge_settings(settings, &old_settings)?;
+    let hotkey_changed = saved.hotkey != old_settings.hotkey
+        || saved.activation_mode != old_settings.activation_mode;
 
-    // Re-register hotkey if it changed
-    if saved.hotkey != old_settings.hotkey {
-        let _ = hotkey_mgr.register(&app, &saved.hotkey, |app_handle| {
-            let _ = app_handle.emit("tray-toggle-recording", ());
-        });
+    if hotkey_changed {
+        register_from_settings(&app, &hotkey_mgr, &saved).inspect_err(|_| {
+            let _ = register_from_settings(&app, &hotkey_mgr, &old_settings);
+        })?;
+    }
+
+    if let Err(e) = save_settings_to_file(&saved) {
+        if hotkey_changed {
+            let _ = register_from_settings(&app, &hotkey_mgr, &old_settings);
+        }
+        return Err(e);
     }
 
     // Toggle autostart if it changed
@@ -120,44 +132,59 @@ pub fn start_recording(
 
     recorder.start_recording()?;
 
-    // Subtle ascending chime
-    play_start_chime();
+    play_sound("Speech On");
 
     // Update tray state
     let _ = tray::set_tray_state(&app, tray::TrayState::Recording);
 
     let _ = app.emit("recording-started", ());
+    spawn_recording_timeout_monitor(app.clone());
 
     Ok(())
 }
 
-/// Plays a subtle two-note chime to indicate recording started.
-fn play_start_chime() {
-    std::thread::spawn(|| {
+/// Plays a Windows system sound by name from C:\Windows\Media\{name}.wav
+fn play_sound(name: &'static str) {
+    std::thread::spawn(move || {
         #[cfg(target_os = "windows")]
         {
+            use std::os::windows::ffi::OsStrExt;
+            use std::ffi::OsStr;
+
             extern "system" {
-                fn Beep(dwFreq: u32, dwDuration: u32) -> i32;
+                fn PlaySoundW(psz_sound: *const u16, hmod: *const core::ffi::c_void, fdw_sound: u32) -> i32;
             }
+
+            const SND_FILENAME: u32 = 0x00020000;
+            const SND_ASYNC: u32 = 0x0001;
+
+            let path = format!("C:\\Windows\\Media\\{name}.wav");
+            let wide: Vec<u16> = OsStr::new(&path).encode_wide().chain(Some(0)).collect();
+
             unsafe {
-                // Pleasant ascending two-note chime (C5 → E5)
-                Beep(523, 80);
-                Beep(659, 100);
+                PlaySoundW(wide.as_ptr(), std::ptr::null(), SND_FILENAME | SND_ASYNC);
             }
         }
     });
 }
 
 #[tauri::command]
-pub async fn stop_recording(
-    app: AppHandle,
-    recorder: State<'_, AudioRecorder>,
-    db: State<'_, Database>,
-) -> Result<(), String> {
-    let duration_ms = recorder.duration_ms() as i64;
+pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
+    finalize_recording(app).await
+}
 
-    // Stop recording and get WAV data (this is blocking, so do it synchronously)
-    let wav_data = recorder.stop_recording()?;
+async fn finalize_recording(app: AppHandle) -> Result<(), String> {
+    let duration_ms = {
+        let recorder = app.state::<AudioRecorder>();
+        recorder.duration_ms() as i64
+    };
+
+    let wav_data = {
+        let recorder = app.state::<AudioRecorder>();
+        recorder.stop_recording()?
+    };
+
+    play_sound("Speech Off");
 
     // Update tray to processing state
     let _ = tray::set_tray_state(&app, tray::TrayState::Processing);
@@ -179,6 +206,7 @@ pub async fn stop_recording(
     {
         Ok(result) => {
             // Save to database
+            let db = app.state::<Database>();
             let _ = db.insert(
                 &result.text,
                 &settings.provider,
@@ -228,4 +256,38 @@ pub fn get_recording_state(recorder: State<'_, AudioRecorder>) -> String {
     } else {
         "idle".to_string()
     }
+}
+
+fn spawn_recording_timeout_monitor(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+
+            let limit_reached = {
+                let recorder = app.state::<AudioRecorder>();
+                recorder.limit_reached()
+            };
+
+            if limit_reached {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("TinyWhispr")
+                    .body("Maximum recording duration reached (5 min)")
+                    .show();
+
+                let _ = finalize_recording(app.clone()).await;
+                break;
+            }
+
+            let still_recording = {
+                let recorder = app.state::<AudioRecorder>();
+                recorder.is_recording()
+            };
+
+            if !still_recording {
+                break;
+            }
+        }
+    });
 }

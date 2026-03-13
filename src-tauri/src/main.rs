@@ -1,10 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
 use tinywhispr::audio::AudioRecorder;
 use tinywhispr::db::Database;
-use tinywhispr::hotkey::HotkeyManager;
+use tinywhispr::hotkey::{register_from_settings, HotkeyManager};
 use tinywhispr::settings::load_settings;
 use tinywhispr::tray;
 
@@ -45,9 +45,7 @@ fn main() {
             // Load settings and register global hotkey
             let settings = load_settings();
             let hotkey_mgr = app_handle.state::<HotkeyManager>();
-            if let Err(e) = hotkey_mgr.register(&app_handle, &settings.hotkey, |app_handle| {
-                let _ = app_handle.emit("tray-toggle-recording", ());
-            }) {
+            if let Err(e) = register_from_settings(&app_handle, &hotkey_mgr, &settings) {
                 eprintln!("Failed to register hotkey: {e}");
             }
 
