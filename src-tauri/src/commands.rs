@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 
@@ -120,12 +120,123 @@ pub fn start_recording(
 
     recorder.start_recording()?;
 
+    // Play Windows start sound
+    play_system_sound();
+
+    // Show brief overlay toast
+    show_recording_overlay(&app);
+
     // Update tray state
     let _ = tray::set_tray_state(&app, tray::TrayState::Recording);
 
     let _ = app.emit("recording-started", ());
 
     Ok(())
+}
+
+/// Plays a short beep sound to indicate recording started.
+fn play_system_sound() {
+    // Use a brief high-pitched beep (800Hz for 150ms)
+    std::thread::spawn(|| {
+        #[cfg(target_os = "windows")]
+        {
+            // kernel32 Beep is always available
+            extern "system" {
+                fn Beep(dwFreq: u32, dwDuration: u32) -> i32;
+            }
+            unsafe {
+                Beep(800, 150);
+            }
+        }
+    });
+}
+
+/// Shows a small overlay that says "Recording..." then fades and closes itself.
+fn show_recording_overlay(app: &AppHandle) {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    // Remove previous overlay if still open
+    if let Some(w) = app.get_webview_window("recording-overlay") {
+        let _ = w.close();
+    }
+
+    let html = r#"data:text/html,
+    <!DOCTYPE html>
+    <html>
+    <head><style>
+    * { margin:0; padding:0; }
+    body {
+        background: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        font-family: system-ui, sans-serif;
+        overflow: hidden;
+    }
+    .toast {
+        background: rgba(239, 68, 68, 0.9);
+        color: white;
+        padding: 8px 20px;
+        border-radius: 24px;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        animation: appear 0.2s ease-out, fade 0.4s ease-in 1.2s forwards;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: white;
+        animation: pulse 1s ease-in-out infinite;
+    }
+    @keyframes appear {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fade {
+        to { opacity: 0; transform: translateY(-8px); }
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+    </style></head>
+    <body>
+        <div class="toast">
+            <span class="dot"></span>
+            Recording...
+        </div>
+    </body>
+    </html>"#;
+
+    let builder = WebviewWindowBuilder::new(app, "recording-overlay", WebviewUrl::External(html.parse().unwrap()))
+        .title("")
+        .inner_size(200.0, 50.0)
+        .center()
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false);
+
+    if let Ok(window) = builder.build() {
+        let _ = window.set_ignore_cursor_events(true);
+
+        // Auto-close after the animation finishes (1.6s)
+        let w = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1700));
+            let _ = w.close();
+        });
+    }
 }
 
 #[tauri::command]
