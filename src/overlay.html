@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body {
+      background: transparent;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    .container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .toast {
+      background: #dc2626;
+      color: white;
+      padding: 10px 24px;
+      border-radius: 28px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 6px 24px rgba(220, 38, 38, 0.5), 0 2px 8px rgba(0,0,0,0.2);
+      animation: appear 0.25s ease-out, fade 0.5s ease-in 1.1s forwards;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 0 6px rgba(255,255,255,0.8);
+      animation: pulse 0.8s ease-in-out infinite;
+    }
+    @keyframes appear {
+      from { opacity: 0; transform: scale(0.9) translateY(-6px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    @keyframes fade {
+      to { opacity: 0; transform: scale(0.95) translateY(-4px); }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="toast">
+      <span class="dot"></span>
+      Recording...
+    </div>
+  </div>
+</body>
+</html>
