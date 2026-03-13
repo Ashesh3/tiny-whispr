@@ -84,8 +84,10 @@ pub fn validate_settings(settings: &Settings) -> Result<(), String> {
         ));
     }
 
-    // hotkey must have at least one modifier (Ctrl/Alt/Shift) + a non-modifier key
-    validate_hotkey(&settings.hotkey)?;
+    // hotkey: empty means "no hotkey" (valid), otherwise must have modifier + non-modifier
+    if !settings.hotkey.is_empty() {
+        validate_hotkey(&settings.hotkey)?;
+    }
 
     Ok(())
 }

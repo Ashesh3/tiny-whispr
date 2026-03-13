@@ -113,6 +113,10 @@ pub fn register_from_settings(
     hotkey_mgr: &HotkeyManager,
     settings: &Settings,
 ) -> Result<(), String> {
+    if settings.hotkey.is_empty() {
+        hotkey_mgr.unregister(app)?;
+        return Ok(());
+    }
     hotkey_mgr.register(app, &settings.hotkey, &settings.activation_mode)
 }
 

@@ -225,13 +225,24 @@
         Press a key combo...
       </div>
     {:else}
-      <button
-        id="hotkey"
-        class="w-full bg-surface border border-border rounded-md px-3 py-2 text-[13px] text-text-primary outline-none cursor-pointer text-left hover:border-accent transition-colors"
-        onclick={() => capturingHotkey = true}
-      >
-        {form.hotkey}
-      </button>
+      <div class="flex gap-2">
+        <button
+          id="hotkey"
+          class="flex-1 bg-surface border border-border rounded-md px-3 py-2 text-[13px] outline-none cursor-pointer text-left hover:border-accent transition-colors {form.hotkey ? 'text-text-primary' : 'text-text-muted'}"
+          onclick={() => capturingHotkey = true}
+        >
+          {form.hotkey || "None (click to set)"}
+        </button>
+        {#if form.hotkey}
+          <button
+            class="bg-surface border border-border rounded-md px-3 py-2 text-[12px] text-text-muted hover:text-recording hover:border-recording/50 transition-colors cursor-pointer"
+            onclick={() => form.hotkey = ""}
+            title="Remove hotkey"
+          >
+            Clear
+          </button>
+        {/if}
+      </div>
     {/if}
   </div>
 
