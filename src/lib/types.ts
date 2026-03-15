@@ -8,6 +8,7 @@ export interface Settings {
   activation_mode: string;
   output_mode: string;
   launch_at_startup: boolean;
+  microphone_device_id: string;
 }
 
 export interface Transcription {
@@ -18,6 +19,12 @@ export interface Transcription {
   language: string | null;
   duration_ms: number | null;
   created_at: string;
+}
+
+export interface InputDevice {
+  id: string;
+  name: string;
+  is_default: boolean;
 }
 
 export interface ProviderPreset {

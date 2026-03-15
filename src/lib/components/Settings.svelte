@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { settings, settingsError, loadSettings, saveSettings } from "../stores/settings";
-  import { PROVIDER_PRESETS, type Settings } from "../types";
+  import { PROVIDER_PRESETS, type Settings, type InputDevice } from "../types";
 
   let form = $state<Settings>({
     provider: "openai",
@@ -13,6 +14,7 @@
     activation_mode: "toggle",
     output_mode: "auto_paste",
     launch_at_startup: false,
+    microphone_device_id: "",
   });
 
   let saving = $state(false);
@@ -20,6 +22,7 @@
   let capturingHotkey = $state(false);
   let error = $state<string | null>(null);
   let hotkeyEl = $state<HTMLDivElement | null>(null);
+  let inputDevices = $state<InputDevice[]>([]);
 
   $effect(() => {
     if (capturingHotkey && hotkeyEl) {
@@ -62,6 +65,9 @@
 
   onMount(() => {
     loadSettings();
+    invoke<InputDevice[]>("list_input_devices").then((devices) => {
+      inputDevices = devices;
+    });
     return () => {
       unsubscribe();
     };
@@ -282,6 +288,21 @@
     >
       {#each languages as lang}
         <option value={lang.value}>{lang.label}</option>
+      {/each}
+    </select>
+  </div>
+
+  <!-- Microphone -->
+  <div class="space-y-1.5">
+    <label class="text-[12px] text-text-secondary font-medium" for="microphone">Microphone</label>
+    <select
+      id="microphone"
+      class="w-full bg-surface border border-border rounded-md px-3 py-2 text-[13px] text-text-primary outline-none focus:border-accent"
+      bind:value={form.microphone_device_id}
+    >
+      <option value="">System Default</option>
+      {#each inputDevices as device}
+        <option value={device.id}>{device.name}{device.is_default ? " (default)" : ""}</option>
       {/each}
     </select>
   </div>

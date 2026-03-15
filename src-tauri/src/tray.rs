@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{image::Image, AppHandle, Emitter, Manager};
 
@@ -45,12 +45,15 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
         .build(app)
         .map_err(|e| format!("Failed to create quit menu item: {e}"))?;
 
+    let mic_submenu = build_mic_submenu(app)?;
+
     let sep1 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+    let sep3 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
 
     let menu = Menu::with_items(
         app,
-        &[&toggle_item, &sep1, &settings_item, &history_item, &sep2, &quit_item],
+        &[&toggle_item, &sep1, &mic_submenu, &sep2, &settings_item, &history_item, &sep3, &quit_item],
     )
     .map_err(|e| e.to_string())?;
 
@@ -68,7 +71,8 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
         .tooltip("TinyWhispr — Click to record")
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| {
-            match event.id().as_ref() {
+            let id = event.id().as_ref();
+            match id {
                 "toggle" => { let _ = app.emit("tray-toggle-recording", ()); }
                 "settings" => {
                     show_main_window(app);
@@ -79,6 +83,13 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
                     let _ = app.emit("navigate", "history");
                 }
                 "quit" => app.exit(0),
+                _ if id.starts_with("mic:") => {
+                    let device_id = &id[4..]; // strip "mic:" prefix
+                    let mut settings = crate::settings::load_settings();
+                    settings.microphone_device_id = device_id.to_string();
+                    let _ = crate::settings::save_settings_to_file(&settings);
+                    let _ = app.emit("settings-changed", ());
+                }
                 _ => {}
             }
         })
@@ -182,4 +193,44 @@ fn set_tray_icon_bytes(app: &AppHandle, bytes: &[u8]) -> Result<(), String> {
     let icon = Image::from_bytes(bytes).map_err(|e| format!("Failed to load icon: {e}"))?;
     tray.set_icon(Some(icon))
         .map_err(|e| format!("Failed to set icon: {e}"))
+}
+
+fn build_mic_submenu(app: &AppHandle) -> Result<tauri::menu::Submenu<tauri::Wry>, String> {
+    let settings = crate::settings::load_settings();
+    let devices = crate::audio::list_input_devices();
+
+    let mut builder = SubmenuBuilder::with_id(app, "mic-submenu", "Microphone");
+
+    // "System Default" option
+    let default_label = if settings.microphone_device_id.is_empty() {
+        "System Default  \u{2713}"
+    } else {
+        "System Default"
+    };
+    builder = builder.item(
+        &MenuItemBuilder::with_id("mic:", default_label)
+            .build(app)
+            .map_err(|e| e.to_string())?,
+    );
+
+    // Separator
+    builder = builder.separator();
+
+    // Individual devices
+    for device in &devices {
+        let is_selected = device.id == settings.microphone_device_id;
+        let label = if is_selected {
+            format!("{}  \u{2713}", device.name)
+        } else {
+            device.name.clone()
+        };
+        let id = format!("mic:{}", device.id);
+        builder = builder.item(
+            &MenuItemBuilder::with_id(id, label)
+                .build(app)
+                .map_err(|e| e.to_string())?,
+        );
+    }
+
+    builder.build().map_err(|e| e.to_string())
 }

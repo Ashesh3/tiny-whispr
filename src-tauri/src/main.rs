@@ -31,6 +31,7 @@ fn main() {
             tinywhispr::commands::clear_history,
             tinywhispr::commands::search_history,
             tinywhispr::commands::copy_to_clipboard,
+            tinywhispr::commands::list_input_devices,
             tinywhispr::commands::start_recording,
             tinywhispr::commands::stop_recording,
             tinywhispr::commands::get_recording_state,

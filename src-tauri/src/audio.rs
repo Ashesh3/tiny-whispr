@@ -1,5 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -38,7 +39,7 @@ impl AudioRecorder {
         self.limit_reached.load(Ordering::SeqCst)
     }
 
-    pub fn start_recording(&self) -> Result<(), String> {
+    pub fn start_recording(&self, device_id: &str) -> Result<(), String> {
         if self.is_recording() {
             return Err("Already recording".to_string());
         }
@@ -55,6 +56,7 @@ impl AudioRecorder {
         let limit_reached = Arc::clone(&self.limit_reached);
         let samples = Arc::clone(&self.samples);
         let sample_rate_shared = Arc::clone(&self.sample_rate);
+        let device_id_owned = device_id.to_string();
 
         // Use a channel to communicate any startup errors back to the caller
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
@@ -62,7 +64,21 @@ impl AudioRecorder {
         // Build and play stream on a dedicated thread so Stream never crosses thread boundaries
         std::thread::spawn(move || {
             let host = cpal::default_host();
-            let device = match host.default_input_device() {
+            let device = if device_id_owned.is_empty() {
+                host.default_input_device()
+            } else {
+                // Find by name match
+                host.input_devices()
+                    .ok()
+                    .and_then(|mut devices| {
+                        devices.find(|d| {
+                            d.name().map(|n| n == device_id_owned).unwrap_or(false)
+                        })
+                    })
+                    .or_else(|| host.default_input_device())
+            };
+
+            let device = match device {
                 Some(d) => d,
                 None => {
                     let _ = tx.send(Err("No input device available".to_string()));
@@ -286,6 +302,37 @@ where
         limit_reached.store(true, Ordering::SeqCst);
         is_recording.store(false, Ordering::SeqCst);
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InputDevice {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+pub fn list_input_devices() -> Vec<InputDevice> {
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .and_then(|d| d.name().ok())
+        .unwrap_or_default();
+
+    let devices = match host.input_devices() {
+        Ok(d) => d,
+        Err(_) => return vec![],
+    };
+
+    devices
+        .filter_map(|d| {
+            let name = d.name().ok()?;
+            Some(InputDevice {
+                id: name.clone(),
+                name: name.clone(),
+                is_default: name == default_name,
+            })
+        })
+        .collect()
 }
 
 /// Resamples mono f32 audio from `from_rate` to `to_rate` using rubato.

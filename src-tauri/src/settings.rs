@@ -13,6 +13,8 @@ pub struct Settings {
     pub activation_mode: String,
     pub output_mode: String,
     pub launch_at_startup: bool,
+    #[serde(default)]
+    pub microphone_device_id: String,
 }
 
 impl Default for Settings {
@@ -27,6 +29,7 @@ impl Default for Settings {
             activation_mode: "toggle".to_string(),
             output_mode: "auto_paste".to_string(),
             launch_at_startup: false,
+            microphone_device_id: String::new(),
         }
     }
 }

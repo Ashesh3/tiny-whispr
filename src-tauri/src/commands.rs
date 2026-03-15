@@ -114,6 +114,11 @@ pub fn copy_to_clipboard(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn list_input_devices() -> Vec<crate::audio::InputDevice> {
+    crate::audio::list_input_devices()
+}
+
+#[tauri::command]
 pub fn start_recording(
     app: AppHandle,
     recorder: State<'_, AudioRecorder>,
@@ -130,7 +135,7 @@ pub fn start_recording(
         return Err("No API key configured".to_string());
     }
 
-    recorder.start_recording()?;
+    recorder.start_recording(&settings.microphone_device_id)?;
 
     play_sound("Speech On");
 
