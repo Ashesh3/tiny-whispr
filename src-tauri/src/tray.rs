@@ -88,6 +88,8 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
                     let mut settings = crate::settings::load_settings();
                     settings.microphone_device_id = device_id.to_string();
                     let _ = crate::settings::save_settings_to_file(&settings);
+                    // Rebuild entire tray to update mic checkmarks
+                    let _ = rebuild_tray(app);
                     let _ = app.emit("settings-changed", ());
                 }
                 _ => {}
@@ -114,6 +116,36 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+/// Rebuilds the tray menu to reflect updated settings (e.g. mic selection).
+fn rebuild_tray(app: &AppHandle) -> Result<(), String> {
+    let toggle_item = MenuItemBuilder::with_id("toggle", "Start Recording")
+        .build(app).map_err(|e| e.to_string())?;
+    let settings_item = MenuItemBuilder::with_id("settings", "Open Settings")
+        .build(app).map_err(|e| e.to_string())?;
+    let history_item = MenuItemBuilder::with_id("history", "Open History")
+        .build(app).map_err(|e| e.to_string())?;
+    let quit_item = MenuItemBuilder::with_id("quit", "Quit")
+        .build(app).map_err(|e| e.to_string())?;
+    let mic_submenu = build_mic_submenu(app)?;
+    let sep1 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+    let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+    let sep3 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+
+    let menu = Menu::with_items(
+        app,
+        &[&toggle_item, &sep1, &mic_submenu, &sep2, &settings_item, &history_item, &sep3, &quit_item],
+    ).map_err(|e| e.to_string())?;
+
+    // Update managed toggle item
+    let managed = app.state::<TrayManagedState>();
+    *managed.toggle_item.lock().map_err(|e| format!("Lock error: {e}"))? = toggle_item;
+
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Sets the tray icon, tooltip, and menu text for the given state.

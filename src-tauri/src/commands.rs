@@ -25,6 +25,7 @@ pub struct MaskedSettings {
     pub activation_mode: String,
     pub output_mode: String,
     pub launch_at_startup: bool,
+    pub microphone_device_id: String,
 }
 
 impl From<&Settings> for MaskedSettings {
@@ -39,6 +40,7 @@ impl From<&Settings> for MaskedSettings {
             activation_mode: s.activation_mode.clone(),
             output_mode: s.output_mode.clone(),
             launch_at_startup: s.launch_at_startup,
+            microphone_device_id: s.microphone_device_id.clone(),
         }
     }
 }
